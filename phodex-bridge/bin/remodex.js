@@ -8,8 +8,21 @@
 const { startBridge, openLastActiveThread, watchThreadRollout } = require("../src");
 
 const command = process.argv[2] || "up";
+const usage = "Usage: remodex up [--local] | remodex resume | remodex watch [threadId]";
 
 if (command === "up") {
+  const flags = process.argv.slice(3);
+  for (const flag of flags) {
+    if (flag === "--local") {
+      process.env.REMODEX_LOCAL = "true";
+      continue;
+    }
+
+    console.error(`Unknown flag for remodex up: ${flag}`);
+    console.error(usage);
+    process.exit(1);
+  }
+
   startBridge();
   return;
 }
@@ -39,6 +52,6 @@ if (command === "watch") {
 
 if (command !== "up") {
   console.error(`Unknown command: ${command}`);
-  console.error("Usage: remodex up | remodex resume | remodex watch [threadId]");
+  console.error(usage);
   process.exit(1);
 }

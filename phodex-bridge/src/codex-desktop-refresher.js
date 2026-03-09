@@ -535,6 +535,10 @@ function readBridgeConfig({ env = process.env, platform = process.platform } = {
       "wss://api.phodex.app/relay",
       env
     ),
+    localMode: parseBooleanEnv(readFirstDefinedEnv(["REMODEX_LOCAL"], "false", env)),
+    localPort: parseIntegerEnv(readFirstDefinedEnv(["REMODEX_LOCAL_PORT"], "9000", env), 9000),
+    localHost: readFirstDefinedEnv(["REMODEX_LOCAL_HOST"], "", env),
+    localBindHost: readFirstDefinedEnv(["REMODEX_LOCAL_BIND_HOST"], "", env),
     refreshEnabled: explicitRefreshEnabled == null
       ? defaultRefreshEnabled
       : explicitRefreshEnabled,
