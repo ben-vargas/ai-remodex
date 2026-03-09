@@ -12,7 +12,7 @@ const {
 } = require("./codex-desktop-refresher");
 const { createCodexTransport } = require("./codex-transport");
 const { createThreadRolloutActivityWatcher } = require("./rollout-watch");
-const { startLocalServer, detectAdvertisedHost } = require("./local-server");
+const { startLocalServer, detectAdvertisedHost, detectBindHost } = require("./local-server");
 const { printQR } = require("./qr");
 const { rememberActiveThread } = require("./session-state");
 const { handleGitRequest } = require("./git-handler");
@@ -330,7 +330,10 @@ function startBridge() {
 
   function startLocalMode() {
     const advertisedHost = detectAdvertisedHost({ explicitHost: config.localHost });
-    const bindHost = config.localBindHost;
+    const bindHost = detectBindHost({
+      explicitBindHost: config.localBindHost,
+      explicitHost: config.localHost,
+    });
     const port = config.localPort;
     const localUrl = `ws://${advertisedHost}:${port}`;
     const pairingPayload = {
@@ -345,8 +348,13 @@ function startBridge() {
       onListening() {
         printQR(pairingPayload, { label: "Local" });
         console.log(
-          `[remodex] Local server listening on ${bindHost.trim() || "0.0.0.0"}:${port}`
+          `[remodex] Local server listening on ${bindHost}:${port}`
         );
+        if (bindHost === "0.0.0.0") {
+          console.warn(
+            "[remodex] Local server is bound to all IPv4 interfaces; only use this on networks you trust."
+          );
+        }
         if (advertisedHost === "127.0.0.1") {
           console.warn(
             "[remodex] Advertised host fell back to 127.0.0.1; set REMODEX_LOCAL_HOST for physical-device pairing."

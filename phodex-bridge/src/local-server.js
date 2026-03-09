@@ -1,7 +1,7 @@
 // FILE: local-server.js
 // Purpose: Hosts the direct iPhone-to-Mac WebSocket bridge for local mode.
 // Layer: CLI helper
-// Exports: startLocalServer, detectAdvertisedHost, isTailscaleIPv4, validateUpgradeRequest
+// Exports: startLocalServer, detectAdvertisedHost, detectBindHost, isTailscaleIPv4, validateUpgradeRequest
 // Depends on: http, os, ws
 
 const http = require("http");
@@ -100,18 +100,25 @@ function detectAdvertisedHost({
     return trimmedExplicitHost;
   }
 
-  const ipv4Addresses = collectExternalIPv4Addresses(networkInterfaces);
-  const tailscaleAddress = ipv4Addresses.find((address) => isTailscaleIPv4(address));
-  if (tailscaleAddress) {
-    return tailscaleAddress;
+  return detectPreferredBindHost({ networkInterfaces });
+}
+
+function detectBindHost({
+  explicitBindHost = "",
+  explicitHost = "",
+  networkInterfaces = os.networkInterfaces(),
+} = {}) {
+  const trimmedBindHost = typeof explicitBindHost === "string" ? explicitBindHost.trim() : "";
+  if (trimmedBindHost) {
+    return trimmedBindHost;
   }
 
-  const firstLanAddress = ipv4Addresses[0];
-  if (firstLanAddress) {
-    return firstLanAddress;
+  const trimmedExplicitHost = typeof explicitHost === "string" ? explicitHost.trim() : "";
+  if (isIPv4(trimmedExplicitHost)) {
+    return trimmedExplicitHost;
   }
 
-  return "127.0.0.1";
+  return detectPreferredBindHost({ networkInterfaces });
 }
 
 function isTailscaleIPv4(address) {
@@ -147,7 +154,22 @@ function validateUpgradeRequest(request, sessionId) {
 
 function normalizeBindHost(bindHost) {
   const trimmedBindHost = typeof bindHost === "string" ? bindHost.trim() : "";
-  return trimmedBindHost || "0.0.0.0";
+  return trimmedBindHost || "127.0.0.1";
+}
+
+function detectPreferredBindHost({ networkInterfaces = os.networkInterfaces() } = {}) {
+  const ipv4Addresses = collectExternalIPv4Addresses(networkInterfaces);
+  const tailscaleAddress = ipv4Addresses.find((address) => isTailscaleIPv4(address));
+  if (tailscaleAddress) {
+    return tailscaleAddress;
+  }
+
+  const firstLanAddress = ipv4Addresses[0];
+  if (firstLanAddress) {
+    return firstLanAddress;
+  }
+
+  return "127.0.0.1";
 }
 
 function collectExternalIPv4Addresses(networkInterfaces) {
@@ -200,6 +222,12 @@ function readHeaderValue(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function isIPv4(value) {
+  const octets = String(value).split(".").map((part) => Number.parseInt(part, 10));
+  return octets.length === 4
+    && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255);
+}
+
 function writeUpgradeRejection(socket, statusCode, statusMessage) {
   const response = [
     `HTTP/1.1 ${statusCode} ${statusMessage}`,
@@ -229,6 +257,7 @@ function closeSocket(socket, code, reason) {
 module.exports = {
   startLocalServer,
   detectAdvertisedHost,
+  detectBindHost,
   isTailscaleIPv4,
   validateUpgradeRequest,
 };

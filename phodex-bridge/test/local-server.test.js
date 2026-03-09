@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   detectAdvertisedHost,
+  detectBindHost,
   isTailscaleIPv4,
   validateUpgradeRequest,
 } = require("../src/local-server");
@@ -26,6 +27,56 @@ test("detectAdvertisedHost prefers an explicit override", () => {
 
 test("detectAdvertisedHost prefers Tailscale over LAN addresses", () => {
   const host = detectAdvertisedHost({
+    networkInterfaces: {
+      en0: [
+        { family: "IPv4", address: "192.168.1.20", internal: false },
+      ],
+      utun4: [
+        { family: "IPv4", address: "100.88.3.7", internal: false },
+      ],
+    },
+  });
+
+  assert.equal(host, "100.88.3.7");
+});
+
+test("detectBindHost prefers an explicit bind override", () => {
+  const host = detectBindHost({
+    explicitBindHost: "0.0.0.0",
+    explicitHost: "100.88.3.7",
+    networkInterfaces: {},
+  });
+
+  assert.equal(host, "0.0.0.0");
+});
+
+test("detectBindHost uses an explicit IPv4 host when present", () => {
+  const host = detectBindHost({
+    explicitHost: "100.88.3.7",
+    networkInterfaces: {},
+  });
+
+  assert.equal(host, "100.88.3.7");
+});
+
+test("detectBindHost falls back to the preferred local interface for hostnames", () => {
+  const host = detectBindHost({
+    explicitHost: "macbook.tail1234.ts.net",
+    networkInterfaces: {
+      en0: [
+        { family: "IPv4", address: "192.168.1.20", internal: false },
+      ],
+      utun4: [
+        { family: "IPv4", address: "100.88.3.7", internal: false },
+      ],
+    },
+  });
+
+  assert.equal(host, "100.88.3.7");
+});
+
+test("detectBindHost defaults to a single preferred interface instead of all interfaces", () => {
+  const host = detectBindHost({
     networkInterfaces: {
       en0: [
         { family: "IPv4", address: "192.168.1.20", internal: false },

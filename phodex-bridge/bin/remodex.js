@@ -8,13 +8,20 @@
 const { startBridge, openLastActiveThread, watchThreadRollout } = require("../src");
 
 const command = process.argv[2] || "up";
-const usage = "Usage: remodex up [--local] | remodex resume | remodex watch [threadId]";
+const usage =
+  "Usage: remodex up [--local] [--local-bind-all] | remodex resume | remodex watch [threadId]";
 
 if (command === "up") {
   const flags = process.argv.slice(3);
   for (const flag of flags) {
     if (flag === "--local") {
       process.env.REMODEX_LOCAL = "true";
+      continue;
+    }
+
+    if (flag === "--local-bind-all") {
+      process.env.REMODEX_LOCAL = "true";
+      process.env.REMODEX_LOCAL_BIND_HOST = "0.0.0.0";
       continue;
     }
 

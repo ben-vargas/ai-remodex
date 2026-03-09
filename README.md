@@ -125,13 +125,14 @@ npm start -- --local
 
 ## Commands
 
-### `remodex up [--local]`
+### `remodex up [--local] [--local-bind-all]`
 
 Starts the bridge:
 
 - Spawns `codex app-server` (or connects to an existing endpoint)
 - In default mode, connects the Mac bridge to the relay session endpoint
-- In `--local` mode, starts a local WebSocket server and prints a QR that points directly at your Mac
+- In `--local` mode, starts a local WebSocket server bound to one preferred local interface and prints a QR that points directly at your Mac
+- `--local-bind-all` explicitly opts into binding the local server to `0.0.0.0`
 - Displays a QR code for phone pairing
 - Forwards JSON-RPC messages bidirectionally
 - Handles git commands from the phone
@@ -168,7 +169,7 @@ All optional. Sensible defaults are provided.
 | `REMODEX_LOCAL` | `false` | Enable direct local bridge mode instead of relay mode |
 | `REMODEX_LOCAL_PORT` | `9000` | Port for the local WebSocket server |
 | `REMODEX_LOCAL_HOST` | auto-detect | Hostname/IP advertised in the pairing QR for local mode |
-| `REMODEX_LOCAL_BIND_HOST` | `0.0.0.0` | Interface/IP the local server binds to in local mode |
+| `REMODEX_LOCAL_BIND_HOST` | auto-detect single interface | Interface/IP the local server binds to in local mode; defaults to the preferred Tailscale/LAN address instead of all interfaces |
 | `REMODEX_CODEX_ENDPOINT` | — | Connect to an existing Codex WebSocket instead of spawning a local `codex app-server` |
 | `REMODEX_REFRESH_ENABLED` | `false` | Auto-refresh Codex.app when phone activity is detected (`true` enables it explicitly) |
 | `REMODEX_REFRESH_DEBOUNCE_MS` | `1200` | Debounce window (ms) for coalescing refresh events |
@@ -177,7 +178,7 @@ All optional. Sensible defaults are provided.
 | `CODEX_HOME` | `~/.codex` | Codex data directory (used here for `sessions/` rollout files) |
 
 ```sh
-# Preferred local-first mode (auto-detects a Tailscale/LAN address for the QR)
+# Preferred local-first mode (auto-detects a Tailscale/LAN address for the QR and bind)
 remodex up --local
 
 # Explicitly enable local mode with a custom local port
@@ -188,6 +189,12 @@ REMODEX_LOCAL_HOST=macbook.tail1234.ts.net remodex up --local
 
 # Enable desktop refresh explicitly
 REMODEX_REFRESH_ENABLED=true remodex up
+
+# Opt into listening on every IPv4 interface
+remodex up --local-bind-all
+
+# Equivalent explicit env override for all-interface binding
+REMODEX_LOCAL_BIND_HOST=0.0.0.0 remodex up --local
 
 # Connect to an existing Codex instance
 REMODEX_CODEX_ENDPOINT=ws://localhost:8080 remodex up
@@ -200,8 +207,9 @@ REMODEX_RELAY=ws://localhost:9000/relay remodex up
 
 - Remodex is local-first: Codex, git operations, and workspace actions run on your Mac, while the iPhone acts as a paired remote control.
 - The pairing QR carries the bridge base URL, session ID, bridge device ID, bridge identity key, and expiry needed to bootstrap end-to-end encryption. After a successful scan, the iPhone stores that pairing in Keychain and tries to reconnect automatically on relaunch or when the app returns to the foreground.
-- `remodex up --local` is the preferred local-first path. It starts a direct `ws://` server on your Mac; over Tailscale, that traffic is already encrypted by WireGuard.
+- `remodex up --local` is the preferred local-first path. It starts a direct `ws://` server on your Mac, bound to a single preferred interface by default; over Tailscale, that traffic is already encrypted by WireGuard.
 - Plain LAN mode works too, but Tailscale is the safer default when you are not on a network you fully trust.
+- Remodex prefers binding to a Tailscale address when one is available. Use `--local-bind-all` only when you intentionally want to accept connections on every IPv4 interface.
 - Relay mode remains available through `REMODEX_RELAY` if you prefer hosted/TLS routing or need a bridge that is reachable without a direct local path. The default relay is `wss://api.phodex.app/relay`, so the socket itself is protected with TLS in transit.
 - If you want to inspect or self-host the relay, the server code is available in [`relay/`](relay/).
 - On the iPhone, the default agent permission mode is `On-Request`. Switching the app to `Full access` auto-approves runtime approval prompts from the agent.
