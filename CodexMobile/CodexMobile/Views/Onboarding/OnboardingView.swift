@@ -62,14 +62,15 @@ struct OnboardingView: View {
 
                                 OnboardingStepRow(
                                     number: "2",
-                                    title: "Start the relay",
-                                    command: "remodex up"
+                                    title: "Start the bridge",
+                                    command: "remodex up --local",
+                                    subtitle: "Use `remodex up` if you need relay mode instead."
                                 )
 
                                 OnboardingStepRow(
                                     number: "3",
                                     title: "Scan the QR code",
-                                   
+                                    subtitle: "Pair directly over Tailscale or LAN from inside the Remodex app."
                                 )
                             }
 

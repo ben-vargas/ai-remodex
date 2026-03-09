@@ -48,7 +48,7 @@ final class CodexServiceConnectionErrorTests: XCTestCase {
                 attemptedURL: "wss://relay.example/session",
                 host: "relay.example"
             ),
-            "Connection refused by relay server at wss://relay.example/session."
+            "Connection refused by bridge server at wss://relay.example/session."
         )
     }
 

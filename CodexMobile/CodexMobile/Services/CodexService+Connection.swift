@@ -407,11 +407,11 @@ extension CodexService {
         if let nwError = error as? NWError {
             switch nwError {
             case .posix(let code) where code == .ECONNREFUSED:
-                return "Connection refused by relay server at \(attemptedURL)."
+                return "Connection refused by bridge server at \(attemptedURL)."
             case .posix(let code) where code == .ETIMEDOUT:
                 return "Connection timed out. Check server/network."
             case .dns(let code):
-                return "Cannot resolve server host (\(code)). Check the relay URL."
+                return "Cannot resolve server host (\(code)). Check the bridge URL."
             default:
                 break
             }
@@ -545,11 +545,11 @@ extension CodexService {
         case 4002:
             return "The Mac session closed. Scan a new QR code to reconnect."
         case 4001:
-            return "This relay session was replaced by another Mac connection. Scan a new QR code to reconnect."
+            return "This bridge session was replaced by another Mac connection. Scan a new QR code to reconnect."
         case 4003:
             return "This device was replaced by a newer connection. Scan a new QR code to reconnect."
         default:
-            return "This relay pairing is no longer valid. Scan a new QR code to reconnect."
+            return "This pairing is no longer valid. Scan a new QR code to reconnect."
         }
     }
 

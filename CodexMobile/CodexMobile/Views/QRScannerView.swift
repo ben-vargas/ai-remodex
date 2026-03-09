@@ -1,5 +1,5 @@
 // FILE: QRScannerView.swift
-// Purpose: AVFoundation camera-based QR scanner for relay session pairing.
+// Purpose: AVFoundation camera-based QR scanner for bridge session pairing.
 // Layer: View
 // Exports: QRScannerView
 // Depends on: SwiftUI, AVFoundation

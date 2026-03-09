@@ -1,5 +1,5 @@
 // FILE: SettingsView.swift
-// Purpose: Settings for Local Mode (Codex runs on user's Mac, relay WebSocket).
+// Purpose: Settings for runtime defaults, bridge connection state, and local app preferences.
 // Layer: View
 // Exports: SettingsView
 
@@ -442,7 +442,7 @@ private struct SettingsArchivedChatsCard: View {
 private struct SettingsAboutCard: View {
     var body: some View {
         SettingsCard(title: "About") {
-            Text("Chats are End-to-end encrypted between your iPhone and Mac. The relay only sees ciphertext and connection metadata after the secure handshake completes.")
+            Text("Remodex connects to Codex running on your Mac through a paired bridge. Local mode can connect directly over Tailscale or LAN, and relay mode stays available when you need hosted routing. Chats stay end-to-end encrypted after the secure handshake completes, so the relay only sees ciphertext and connection metadata.")
                 .font(AppFont.caption())
                 .foregroundStyle(.secondary)
         }
