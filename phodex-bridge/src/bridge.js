@@ -296,6 +296,7 @@ function startBridge() {
       const message = typeof data === "string" ? data : data.toString("utf8");
       if (secureTransport.handleIncomingWireMessage(message, {
         sendControlMessage(controlMessage) {
+          logSecureControlMessage("relay", controlMessage);
           if (nextSocket.readyState === WebSocket.OPEN) {
             nextSocket.send(JSON.stringify(controlMessage));
           }
@@ -375,6 +376,7 @@ function startBridge() {
           const message = typeof data === "string" ? data : data.toString("utf8");
           if (secureTransport.handleIncomingWireMessage(message, {
             sendControlMessage(controlMessage) {
+              logSecureControlMessage("local", controlMessage);
               if (phoneSocket.readyState === WebSocket.OPEN) {
                 phoneSocket.send(JSON.stringify(controlMessage));
               }
@@ -493,6 +495,44 @@ function shutdown(codex, cleanupBridgeResources) {
   setTimeout(() => process.exit(0), 100);
 }
 
+function describeSecureControlMessage(transportLabel, controlMessage) {
+  const kind = readString(controlMessage?.kind);
+  if (kind === "secureError") {
+    const code = readString(controlMessage?.code) || "unknown_secure_error";
+    const message = readString(controlMessage?.message) || "The bridge rejected the secure pairing.";
+    return {
+      level: "warn",
+      line: `[remodex] Secure pairing failed (${transportLabel}, ${code}): ${message}`,
+    };
+  }
+
+  if (kind === "secureReady") {
+    const macDeviceId = readString(controlMessage?.macDeviceId);
+    return {
+      level: "info",
+      line: macDeviceId
+        ? `[remodex] Secure pairing established (${transportLabel}, mac=${macDeviceId})`
+        : `[remodex] Secure pairing established (${transportLabel})`,
+    };
+  }
+
+  return null;
+}
+
+function logSecureControlMessage(transportLabel, controlMessage) {
+  const description = describeSecureControlMessage(transportLabel, controlMessage);
+  if (!description) {
+    return;
+  }
+
+  if (description.level === "warn") {
+    console.warn(description.line);
+    return;
+  }
+
+  console.log(description.line);
+}
+
 function extractBridgeMessageContext(rawMessage) {
   let parsed = null;
   try {
@@ -573,4 +613,4 @@ function readString(value) {
   return typeof value === "string" && value ? value : null;
 }
 
-module.exports = { startBridge };
+module.exports = { startBridge, describeSecureControlMessage };
