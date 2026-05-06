@@ -64,6 +64,27 @@ test("printQR can print the pairing JSON for explicit debug workflows", () => {
   assert.match(output, /"sessionId":"session-debug"/);
 });
 
+test("printQR can label the advertised local endpoint without printing full JSON", () => {
+  const logs = captureConsoleLog(() => {
+    printQR({
+      pairingPayload: {
+        relay: "ws://100.88.3.7:9000",
+        sessionId: "session-local-sensitive",
+        macDeviceId: "mac-123",
+        expiresAt: 1_900_000_000_000,
+      },
+      pairingCode: "ABCDEFGHJK",
+    }, {
+      label: "Local",
+      env: {},
+    });
+  });
+
+  const output = logs.join("\n");
+  assert.match(output, /Local: ws:\/\/100\.88\.3\.7:9000/);
+  assert.doesNotMatch(output, /session-local-sensitive/);
+});
+
 test("shouldPrintPairingJson accepts explicit flags and debug env aliases", () => {
   assert.equal(shouldPrintPairingJson({ explicitValue: true, env: {} }), true);
   assert.equal(shouldPrintPairingJson({ explicitValue: false, env: { REMODEX_PRINT_PAIRING_JSON: "1" } }), false);

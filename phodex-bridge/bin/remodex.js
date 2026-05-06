@@ -49,7 +49,7 @@ async function main({
   exitImpl = process.exit,
   deps = defaultDeps,
 } = {}) {
-  const { command, jsonOutput, watchThreadId } = parseCliArgs(argv.slice(2));
+  const { command, commandArgs, jsonOutput } = parseCliArgs(argv.slice(2));
 
   if (isVersionCommand(command)) {
     emitVersion({ jsonOutput, consoleImpl });
@@ -57,6 +57,7 @@ async function main({
   }
 
   if (command === "up") {
+    applyBridgeFlags(command, commandArgs, { consoleImpl, exitImpl });
     if (platform === "darwin") {
       consoleImpl.log("[remodex] Starting bridge and pairing QR...");
       const result = await deps.startMacOSBridgeService({
@@ -73,6 +74,7 @@ async function main({
   }
 
   if (command === "run") {
+    applyBridgeFlags(command, commandArgs, { consoleImpl, exitImpl });
     deps.startBridge();
     return;
   }
@@ -83,6 +85,7 @@ async function main({
   }
 
   if (command === "start") {
+    applyBridgeFlags(command, commandArgs, { consoleImpl, exitImpl });
     assertMacOSCommand(command, {
       platform,
       consoleImpl,
@@ -107,6 +110,7 @@ async function main({
   }
 
   if (command === "restart") {
+    applyBridgeFlags(command, commandArgs, { consoleImpl, exitImpl });
     assertMacOSCommand(command, {
       platform,
       consoleImpl,
@@ -223,7 +227,7 @@ async function main({
 
   if (command === "watch") {
     try {
-      deps.watchThreadRollout(watchThreadId);
+      deps.watchThreadRollout(commandArgs[0] || "");
     } catch (error) {
       consoleImpl.error(`[remodex] ${(error && error.message) || "Failed to watch the thread rollout."}`);
       exitImpl(1);
@@ -233,9 +237,11 @@ async function main({
 
   consoleImpl.error(`Unknown command: ${command}`);
   consoleImpl.error(
-    "Usage: remodex up | remodex run | remodex start | remodex restart | remodex stop | remodex status | "
-    + "remodex reset-pairing | remodex resume | remodex watch [threadId] | remodex --version | "
-    + "append --json to start/restart/stop/status/reset-pairing/resume for machine-readable output"
+    "Usage: remodex up [--local] [--local-bind-all] | remodex run [--local] [--local-bind-all] | "
+    + "remodex start [--local] [--local-bind-all] | remodex restart [--local] [--local-bind-all] | "
+    + "remodex stop | remodex status | remodex reset-pairing | remodex resume | "
+    + "remodex watch [threadId] | remodex --version | append --json to "
+    + "start/restart/stop/status/reset-pairing/resume for machine-readable output"
   );
   exitImpl(1);
 }
@@ -255,9 +261,31 @@ function parseCliArgs(rawArgs) {
 
   return {
     command: positionals[0] || "up",
+    commandArgs: positionals.slice(1),
     jsonOutput,
-    watchThreadId: positionals[1] || "",
   };
+}
+
+function applyBridgeFlags(activeCommand, flags, {
+  consoleImpl = console,
+  exitImpl = process.exit,
+  env = process.env,
+} = {}) {
+  for (const flag of flags) {
+    if (flag === "--local") {
+      env.REMODEX_LOCAL = "true";
+      continue;
+    }
+
+    if (flag === "--local-bind-all") {
+      env.REMODEX_LOCAL = "true";
+      env.REMODEX_LOCAL_BIND_HOST = "0.0.0.0";
+      continue;
+    }
+
+    consoleImpl.error(`Unknown flag for remodex ${activeCommand}: ${flag}`);
+    exitImpl(1);
+  }
 }
 
 function emitVersion({

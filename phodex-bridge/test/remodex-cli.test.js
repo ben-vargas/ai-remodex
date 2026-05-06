@@ -101,6 +101,50 @@ test("remodex up shows a startup indicator while waiting for the pairing QR", as
   ]);
 });
 
+test("remodex run --local enables direct local bridge mode", async () => {
+  const previousLocal = process.env.REMODEX_LOCAL;
+  const previousBindHost = process.env.REMODEX_LOCAL_BIND_HOST;
+  delete process.env.REMODEX_LOCAL;
+  delete process.env.REMODEX_LOCAL_BIND_HOST;
+
+  let started = false;
+  try {
+    await main({
+      argv: ["node", "remodex", "run", "--local-bind-all"],
+      platform: "linux",
+      consoleImpl: {
+        log() {},
+        error(message) {
+          throw new Error(`unexpected error: ${message}`);
+        },
+      },
+      exitImpl(code) {
+        throw new Error(`unexpected exit ${code}`);
+      },
+      deps: {
+        startBridge() {
+          started = true;
+          assert.equal(process.env.REMODEX_LOCAL, "true");
+          assert.equal(process.env.REMODEX_LOCAL_BIND_HOST, "0.0.0.0");
+        },
+      },
+    });
+  } finally {
+    if (previousLocal === undefined) {
+      delete process.env.REMODEX_LOCAL;
+    } else {
+      process.env.REMODEX_LOCAL = previousLocal;
+    }
+    if (previousBindHost === undefined) {
+      delete process.env.REMODEX_LOCAL_BIND_HOST;
+    } else {
+      process.env.REMODEX_LOCAL_BIND_HOST = previousBindHost;
+    }
+  }
+
+  assert.equal(started, true);
+});
+
 test("remodex status --json exposes daemon metadata for companion apps", async () => {
   const writes = [];
   const originalWrite = process.stdout.write;

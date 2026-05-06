@@ -129,6 +129,10 @@ test("readBridgeConfig keeps safe defaults and explicit overrides", () => {
   assert.equal(macConfig.keepMacAwakeEnabled, false);
   assert.equal(macConfig.relayUrl, "");
   assert.equal(macConfig.pushServiceUrl, "");
+  assert.equal(macConfig.localMode, false);
+  assert.equal(macConfig.localPort, 9000);
+  assert.equal(macConfig.localHost, "");
+  assert.equal(macConfig.localBindHost, "");
   assert.equal(persistedKeepAwakeConfig.keepMacAwakeEnabled, false);
   assert.equal(macEndpointConfig.refreshEnabled, false);
   assert.equal(linuxConfig.refreshEnabled, false);

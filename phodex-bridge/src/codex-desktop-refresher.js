@@ -570,6 +570,10 @@ function readBridgeConfig({
       readFirstDefinedEnv(["REMODEX_PUSH_PREVIEW_MAX_CHARS"], "160", env),
       160
     ),
+    localMode: parseBooleanEnv(readFirstDefinedEnv(["REMODEX_LOCAL"], "false", env)),
+    localPort: parseIntegerEnv(readFirstDefinedEnv(["REMODEX_LOCAL_PORT"], "9000", env), 9000),
+    localHost: readFirstDefinedEnv(["REMODEX_LOCAL_HOST"], "", env),
+    localBindHost: readFirstDefinedEnv(["REMODEX_LOCAL_BIND_HOST"], "", env),
     refreshEnabled: explicitRefreshEnabled == null
       ? defaultRefreshEnabled
       : explicitRefreshEnabled,

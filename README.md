@@ -62,10 +62,10 @@ If you scan the pairing QR with a generic camera or QR reader before installing 
                                         └─────────────┘                           └─────────────┘
 ```
 
-1. Run `remodex up` on your Mac
+1. Run `remodex up --local` on your Mac for direct local pairing, or `remodex up` when using relay mode
 2. On macOS, Remodex installs/starts a lightweight background bridge service and prints a QR for first-time pairing or recovery
 3. Scan the QR once with the Remodex iOS app to trust that Mac
-4. After the first handshake, the iPhone can resolve the Mac's live session through the configured relay and reconnect automatically
+4. After the first handshake, the iPhone can resolve the Mac's live session through the configured relay or saved direct local endpoint and reconnect automatically
 5. Your phone sends instructions to Codex through the bridge and receives responses in real-time
 6. The bridge handles git operations and local session persistence on your Mac
 7. `Codex.app` can read the same thread history from disk, but it is not a true live mirror unless you enable the optional refresh workaround
@@ -118,7 +118,19 @@ If you only want to try Remodex, you can install it from npm and run it without 
 
 ## Quick Start
 
-Install the bridge, then run:
+Install the bridge, then run the direct local mode when your iPhone can reach the bridge over Tailscale or LAN:
+
+```sh
+remodex up --local
+```
+
+To advertise a specific Tailscale hostname:
+
+```sh
+REMODEX_LOCAL_HOST=macbook.tail1234.ts.net remodex up --local
+```
+
+If you prefer relay mode, run:
 
 ```sh
 remodex up
@@ -144,6 +156,13 @@ cd remodex
 ```
 
 That launcher starts a local relay, points the bridge at `ws://<your-host>:9000/relay` by default, and prints the pairing QR for the iPhone app.
+
+If you want one process instead of a relay plus a bridge, run the source bridge directly:
+
+```sh
+cd phodex-bridge
+npm start -- --local
+```
 
 For iPhone self-hosting, the recommended path is Tailscale or another stable private network. Plain LAN pairing over `ws://<lan-ip>` on the same Wi-Fi is still available for local testing, but it can be unreliable on some iOS devices even when the relay and Wi-Fi are healthy.
 
@@ -209,7 +228,7 @@ If you point `REMODEX_RELAY` at your own self-hosted relay, managed push stays o
 
 ## Commands
 
-### `remodex up`
+### `remodex up [--local] [--local-bind-all]`
 
 Starts Remodex.
 
@@ -225,17 +244,19 @@ On non-macOS platforms, `remodex up` runs the bridge in the foreground.
 In both cases the bridge:
 
 - Spawns `codex app-server` (or connects to an existing endpoint)
-- Connects the Mac bridge to the configured relay
+- Connects the Mac bridge to the configured relay, or starts a direct WebSocket server in `--local` mode
 - Forwards JSON-RPC messages bidirectionally
 - Handles git commands from the phone
 - Persists the active thread for later resumption
 
-### `remodex start`
+In `--local` mode, the pairing QR points the iPhone directly at the bridge process. By default the bridge binds to one preferred Tailscale/LAN interface; `--local-bind-all` opts into `0.0.0.0`.
+
+### `remodex start [--local] [--local-bind-all]`
 
 macOS only. Starts the background bridge service without waiting for or printing a QR in the current terminal.
 If the service is already loaded, this path refreshes it in place.
 
-### `remodex restart`
+### `remodex restart [--local] [--local-bind-all]`
 
 macOS only. Explicitly restarts the background bridge service without waiting for or printing a QR in the current terminal.
 
@@ -302,6 +323,10 @@ remodex watch
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REMODEX_RELAY` | empty in source checkouts; optional in published packages | Session base URL used for QR bootstrap, trusted-session resolve, and phone/Mac session routing |
+| `REMODEX_LOCAL` | `false` | Enable direct local bridge mode instead of relay mode |
+| `REMODEX_LOCAL_PORT` | `9000` | Port for the direct local WebSocket server |
+| `REMODEX_LOCAL_HOST` | auto-detect | Hostname or IP advertised in the pairing QR for local mode |
+| `REMODEX_LOCAL_BIND_HOST` | auto-detect single interface | Interface/IP the local server binds to in local mode |
 | `REMODEX_PUSH_SERVICE_URL` | disabled by default | Optional HTTP base URL for managed push registration/completion |
 | `REMODEX_CODEX_ENDPOINT` | — | Connect to an existing Codex WebSocket instead of spawning a local `codex app-server` |
 | `REMODEX_REFRESH_ENABLED` | `false` | Auto-refresh Codex.app when phone activity is detected (`true` enables it explicitly) |
@@ -317,6 +342,12 @@ REMODEX_REFRESH_ENABLED=true remodex up
 # Connect to an existing Codex instance
 REMODEX_CODEX_ENDPOINT=ws://localhost:8080 remodex up
 
+# Run one direct bridge process over Tailscale/LAN without a separate relay
+remodex up --local
+
+# Advertise a stable Tailscale name in the pairing QR
+REMODEX_LOCAL_HOST=macbook.tail1234.ts.net remodex up --local
+
 # Use a custom self-hosted relay endpoint (`ws://` is unencrypted)
 REMODEX_RELAY="ws://localhost:9000/relay" remodex up
 
@@ -331,13 +362,13 @@ On the relay/VPS side, keep push disabled until you actually want it. The HTTP p
 ## Pairing and Safety
 
 - Remodex is local-first: Codex, git operations, and workspace actions run on your Mac, while the iPhone acts as a paired remote control.
-- On iPhone, the most reliable self-host setup is a Tailscale-reachable relay. Plain LAN pairing over `ws://` on the same Wi-Fi can fail on some iOS devices because local-network routing from the app is not always reliable.
+- On iPhone, the most reliable private setup is a Tailscale-reachable endpoint. Use `remodex up --local` when the phone can reach the bridge directly, or point `REMODEX_RELAY` at a relay you run when you need a routing hop.
 - The pairing QR carries the connection URL, the session ID, and the bridge identity key used to bootstrap end-to-end encryption. After a successful first scan, the iPhone stores a trusted Mac record in Keychain and the bridge persists its trusted phone identity locally on the Mac.
-- On macOS, the bridge can keep running as a lightweight `launchd` service, so the phone can resolve the Mac's current live relay session and reconnect without scanning a new QR every time.
+- On macOS, the bridge can keep running as a lightweight `launchd` service, so the phone can resolve the Mac's current live session and reconnect without scanning a new QR every time.
 - The QR is still the recovery path when trust changes, the bridge identity rotates, or the relay cannot resolve the current live session.
 - The bridge state lives canonically in `~/.remodex/device-state.json` with local-only permissions. On macOS the bridge also mirrors that state to Keychain as best-effort backup/migration data, and recent builds auto-repair unreadable local state on startup instead of requiring manual cleanup.
 - The CLI no longer prints the connection URL in plain text below the QR.
-- Set `REMODEX_RELAY` only when you want to self-host or test locally against your own setup.
+- Set `REMODEX_RELAY` only when you want relay mode. Use `REMODEX_LOCAL=true` or `remodex up --local` when you want the bridge process itself to be the Tailscale/LAN endpoint.
 - Leave `REMODEX_TRUST_PROXY` unset for direct/self-hosted installs. Turn it on only when a trusted reverse proxy such as Traefik, Nginx, or Caddy is forwarding the relay traffic.
 - The transport implementation is public in [`relay/`](relay/), but your real deployed hostname and credentials should stay private.
 - On the iPhone, the default agent permission mode is `On-Request`. Switching the app to `Full access` auto-approves runtime approval prompts from the agent.
@@ -463,7 +494,7 @@ No. The phone session is live, but the `Codex.app` GUI is not a true live mirror
 Yes. That is the intended forking path. The transport and push-service code are in [`relay/`](relay/); point `REMODEX_RELAY` at the instance you run.
 
 **Can I use Tailscale?**
-Yes. It is the recommended private-network option for self-hosting on iPhone. Run your relay somewhere reachable over Tailscale, set `REMODEX_RELAY` to that relay URL, pair once with QR, then let the app reconnect to the trusted Mac through the same relay.
+Yes. It is the recommended private-network option for self-hosting on iPhone. For the simplest setup, run `remodex up --local` on the Tailscale-reachable Mac/server and pair once with QR. If you need a routing hop, run your relay somewhere reachable over Tailscale, set `REMODEX_RELAY` to that relay URL, and pair through the relay.
 
 **Is the transport layer safe for sensitive work?**
 It is much stronger than a plain text proxy: traffic can be protected in transit with TLS, application payloads are end-to-end encrypted after the secure handshake, and all Codex execution still happens on your Mac. The transport can still observe connection metadata and handshake control messages, so the tightest trust model is to run it yourself.

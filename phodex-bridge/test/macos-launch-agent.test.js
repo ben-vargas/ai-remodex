@@ -20,6 +20,7 @@ const {
   stopMacOSBridgeService,
 } = require("../src/macos-launch-agent");
 const {
+  readDaemonConfig,
   writeDaemonConfig,
   readBridgeStatus,
   readPairingSession,
@@ -187,8 +188,45 @@ test("runMacOSBridgeService records a clean error state instead of throwing when
     assert.equal(status?.state, "error");
     assert.equal(status?.connectionStatus, "error");
     assert.equal(status?.pid, process.pid);
-    assert.equal(status?.lastError, "No relay URL configured for the macOS bridge service.");
+    assert.equal(status?.lastError, "No relay URL or local mode configured for the macOS bridge service.");
     assert.equal(typeof status?.updatedAt, "string");
+  });
+});
+
+test("startMacOSBridgeService persists local-mode config without requiring a relay URL", () => {
+  withTempDaemonEnv(({ rootDir }) => {
+    const calls = [];
+    const env = {
+      ...process.env,
+      HOME: rootDir,
+      REMODEX_DEVICE_STATE_DIR: rootDir,
+      REMODEX_LOCAL: "true",
+      REMODEX_LOCAL_PORT: "8123",
+      REMODEX_LOCAL_HOST: "macbook.tail1234.ts.net",
+      REMODEX_LOCAL_BIND_HOST: "100.88.3.7",
+    };
+
+    startMacOSBridgeService({
+      env,
+      platform: "darwin",
+      waitForPairing: false,
+      execFileSyncImpl(command, args) {
+        calls.push([command, args]);
+        if (args[0] === "bootout") {
+          const error = new Error("Could not find service");
+          error.stderr = Buffer.from("Could not find service");
+          throw error;
+        }
+      },
+    });
+
+    const config = readDaemonConfig({ env });
+    assert.equal(config?.relayUrl, "");
+    assert.equal(config?.localMode, true);
+    assert.equal(config?.localPort, 8123);
+    assert.equal(config?.localHost, "macbook.tail1234.ts.net");
+    assert.equal(config?.localBindHost, "100.88.3.7");
+    assert.equal(calls.some(([, args]) => args[0] === "bootstrap"), true);
   });
 });
 

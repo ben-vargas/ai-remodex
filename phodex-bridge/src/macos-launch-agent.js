@@ -36,8 +36,8 @@ const DEFAULT_PAIRING_WAIT_INTERVAL_MS = 200;
 function runMacOSBridgeService({ env = process.env } = {}) {
   assertDarwinPlatform();
   const config = readDaemonConfig({ env });
-  if (!config?.relayUrl) {
-    const message = "No relay URL configured for the macOS bridge service.";
+  if (!hasConfiguredTransport(config)) {
+    const message = "No relay URL or local mode configured for the macOS bridge service.";
     // Clear any stale QR so the CLI does not keep showing a pairing payload for a dead service.
     clearPairingSession({ env });
     writeBridgeStatus({
@@ -80,7 +80,7 @@ async function startMacOSBridgeService({
 } = {}) {
   assertDarwinPlatform(platform);
   const config = readBridgeConfig({ env });
-  assertRelayConfigured(config);
+  assertTransportConfigured(config);
   const startedAt = Date.now();
 
   writeDaemonConfig(config, { env, fsImpl });
@@ -393,11 +393,25 @@ function assertDarwinPlatform(platform = process.platform) {
   }
 }
 
-function assertRelayConfigured(config) {
+function hasConfiguredTransport(config) {
+  if (config?.localMode === true) {
+    return true;
+  }
+
   if (typeof config?.relayUrl === "string" && config.relayUrl.trim()) {
+    return true;
+  }
+
+  return false;
+}
+
+function assertTransportConfigured(config) {
+  if (hasConfiguredTransport(config)) {
     return;
   }
-  throw new Error("No relay URL configured. Run ./run-local-remodex.sh or set REMODEX_RELAY before enabling the macOS bridge service.");
+  throw new Error(
+    "No relay URL configured. Run ./run-local-remodex.sh, set REMODEX_RELAY, or use REMODEX_LOCAL=true before enabling the macOS bridge service."
+  );
 }
 
 function launchAgentDomain(env) {

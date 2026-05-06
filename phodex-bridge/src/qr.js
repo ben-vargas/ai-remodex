@@ -46,6 +46,7 @@ function printQR(pairingSessionOrPayload, options = {}) {
   const sessionId = typeof pairingPayload?.sessionId === "string" ? pairingPayload.sessionId.trim() : "";
   const sessionIdShort = sessionId.length > 12 ? `${sessionId.slice(0, 8)}…` : sessionId;
   const env = options.env || process.env;
+  const label = typeof options.label === "string" ? options.label.trim() : "";
 
   console.log("\nScan this QR with the iPhone:\n");
   qrcode.generate(payload, { small: true });
@@ -54,6 +55,9 @@ function printQR(pairingSessionOrPayload, options = {}) {
     console.log(pairingCode);
   }
   console.log(`\nSession ID: ${sessionIdShort || "(none)"}`);
+  if (label) {
+    console.log(`${label}: ${pairingPayload.relay}`);
+  }
   console.log(`Device ID: ${pairingPayload.macDeviceId}`);
   console.log(`Expires: ${new Date(pairingPayload.expiresAt).toISOString()}\n`);
 

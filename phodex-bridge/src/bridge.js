@@ -1,8 +1,8 @@
 // FILE: bridge.js
-// Purpose: Runs Codex locally, bridges relay traffic, and coordinates desktop refreshes for Codex.app.
+// Purpose: Runs Codex locally, bridges relay/local phone traffic, and coordinates desktop refreshes for Codex.app.
 // Layer: CLI service
 // Exports: startBridge
-// Depends on: ws, crypto, os, ./codex-home, ./qr, ./codex-desktop-refresher, ./codex-transport, ./rollout-watch, ./voice-handler, ./ios-app-compatibility
+// Depends on: ws, crypto, os, ./codex-home, ./qr, ./codex-desktop-refresher, ./codex-transport, ./rollout-watch, ./voice-handler, ./local-server, ./ios-app-compatibility
 
 const WebSocket = require("ws");
 const { randomBytes } = require("crypto");
@@ -16,6 +16,7 @@ const {
 } = require("./codex-desktop-refresher");
 const { createCodexTransport } = require("./codex-transport");
 const { createThreadRolloutActivityWatcher } = require("./rollout-watch");
+const { startLocalServer, detectAdvertisedHost, detectBindHost } = require("./local-server");
 const { printQR } = require("./qr");
 const { rememberActiveThread } = require("./session-state");
 const { handleDesktopRequest } = require("./desktop-handler");
@@ -92,8 +93,8 @@ function startBridge({
   const bridgeWakeAssertion = createMacOSBridgeWakeAssertion({
     enabled: config.keepMacAwakeEnabled,
   });
-  const relayBaseUrl = config.relayUrl.replace(/\/+$/, "");
-  if (!relayBaseUrl) {
+  const relayBaseUrl = String(config.relayUrl || "").replace(/\/+$/, "");
+  if (!config.localMode && !relayBaseUrl) {
     console.error("[remodex] No relay URL configured.");
     console.error("[remodex] In a source checkout, run ./run-local-remodex.sh or set REMODEX_RELAY.");
     process.exit(1);
@@ -139,8 +140,9 @@ function startBridge({
   });
   const readBridgePackageVersionStatus = createBridgePackageVersionStatusReader();
 
-  // Keep the local Codex runtime alive across transient relay disconnects.
+  // Keep the local Codex runtime alive across transient phone disconnects.
   let socket = null;
+  let closeLocalServer = null;
   let isShuttingDown = false;
   let reconnectAttempt = 0;
   let reconnectTimer = null;
@@ -178,7 +180,9 @@ function startBridge({
     deviceState,
     onTrustedPhoneUpdate(nextDeviceState) {
       deviceState = nextDeviceState;
-      sendRelayRegistrationUpdate(nextDeviceState);
+      if (!config.localMode) {
+        sendRelayRegistrationUpdate(nextDeviceState);
+      }
     },
   });
   // Keeps one stable sender identity across reconnects so buffered replay state
@@ -347,6 +351,40 @@ function startBridge({
     console.log(`[remodex] ${status}`);
   }
 
+  function cleanupBridgeResources() {
+    if (isShuttingDown) {
+      return;
+    }
+
+    isShuttingDown = true;
+    bridgeWakeAssertion.stop();
+    clearReconnectTimer();
+    clearRelayWatchdog();
+    clearBridgeStatusHeartbeat();
+    stopContextUsageWatcher();
+    rolloutLiveMirror?.stopAll();
+    desktopIpcActionFollower?.stopAll();
+    desktopRefresher.handleTransportReset();
+    failBridgeManagedCodexRequests(new Error("Codex transport closed before the bridge request completed."));
+    forwardedRequestMethodsById.clear();
+    relaySanitizedResponseMethodsById.clear();
+    clearPendingAuthLogin();
+
+    const activeSocket = socket;
+    socket = null;
+
+    if (closeLocalServer) {
+      const closeServer = closeLocalServer;
+      closeLocalServer = null;
+      closeServer();
+      return;
+    }
+
+    if (activeSocket?.readyState === WebSocket.OPEN || activeSocket?.readyState === WebSocket.CONNECTING) {
+      activeSocket.close();
+    }
+  }
+
   // Retries the relay socket while preserving the active Codex process and session id.
   function scheduleRelayReconnect(closeCode) {
     if (isShuttingDown) {
@@ -355,13 +393,7 @@ function startBridge({
 
     if (closeCode === 4000 || closeCode === 4001) {
       logConnectionStatus("disconnected");
-      shutdown(codex, () => socket, () => {
-        isShuttingDown = true;
-        bridgeWakeAssertion.stop();
-        clearReconnectTimer();
-        clearRelayWatchdog();
-        clearBridgeStatusHeartbeat();
-      });
+      shutdown(codex, cleanupBridgeResources);
       return;
     }
 
@@ -409,6 +441,7 @@ function startBridge({
       const message = typeof data === "string" ? data : data.toString("utf8");
       if (secureTransport.handleIncomingWireMessage(message, {
         sendControlMessage(controlMessage) {
+          logSecureControlMessage("relay", controlMessage);
           if (nextSocket.readyState === WebSocket.OPEN) {
             nextSocket.send(JSON.stringify(controlMessage));
           }
@@ -432,15 +465,13 @@ function startBridge({
     nextSocket.on("close", (code) => {
       if (socket === nextSocket) {
         clearRelayWatchdog();
-      }
-      logConnectionStatus("disconnected");
-      if (socket === nextSocket) {
         socket = null;
       }
       stopContextUsageWatcher();
       rolloutLiveMirror?.stopAll();
       desktopIpcActionFollower?.stopAll();
       desktopRefresher.handleTransportReset();
+      logConnectionStatus("disconnected");
       scheduleRelayReconnect(code);
     });
 
@@ -452,17 +483,125 @@ function startBridge({
     });
   }
 
-  const pairingPayload = secureTransport.createPairingPayload();
   const pairingSession = {
-    pairingPayload,
+    pairingPayload: secureTransport.createPairingPayload(),
     pairingCode: createShortPairingCode({ length: SHORT_PAIRING_CODE_LENGTH }),
   };
-  onPairingSession?.(pairingSession);
-  if (printPairingQr) {
-    printQR(pairingSession);
+
+  function startRelayMode() {
+    onPairingSession?.(pairingSession);
+    if (printPairingQr) {
+      printQR(pairingSession);
+    }
+    pushServiceClient.logUnavailable();
+    connectRelay();
   }
-  pushServiceClient.logUnavailable();
-  connectRelay();
+
+  function startLocalMode() {
+    const advertisedHost = detectAdvertisedHost({ explicitHost: config.localHost });
+    const bindHost = detectBindHost({
+      explicitBindHost: config.localBindHost,
+      explicitHost: config.localHost,
+    });
+    const port = config.localPort;
+    const localPairingSession = {
+      ...pairingSession,
+      pairingPayload: {
+        ...pairingSession.pairingPayload,
+        relay: `ws://${advertisedHost}:${port}`,
+      },
+    };
+
+    const { close } = startLocalServer({
+      port,
+      bindHost,
+      sessionId,
+      trustedSessionInfo() {
+        return {
+          ...buildMacRegistration(deviceState, localPairingSession),
+          sessionId,
+        };
+      },
+      onListening() {
+        onPairingSession?.(localPairingSession);
+        if (printPairingQr) {
+          printQR(localPairingSession, { label: "Local" });
+        }
+        console.log(`[remodex] Local server listening on ${bindHost}:${port}`);
+        if (bindHost === "0.0.0.0") {
+          console.warn(
+            "[remodex] Local server is bound to all IPv4 interfaces; only use this on networks you trust."
+          );
+        }
+        if (advertisedHost === "127.0.0.1") {
+          console.warn(
+            "[remodex] Advertised host fell back to 127.0.0.1; set REMODEX_LOCAL_HOST for physical-device pairing."
+          );
+        }
+        logConnectionStatus("waiting for phone (local)");
+      },
+      onConnection(phoneSocket) {
+        socket = phoneSocket;
+        logConnectionStatus("connected (local)");
+        secureTransport.bindLiveSendWireMessage((wireMessage) => {
+          if (phoneSocket.readyState === WebSocket.OPEN) {
+            phoneSocket.send(wireMessage);
+            return true;
+          }
+          return false;
+        });
+
+        phoneSocket.on("message", (data) => {
+          const message = typeof data === "string" ? data : data.toString("utf8");
+          if (secureTransport.handleIncomingWireMessage(message, {
+            sendControlMessage(controlMessage) {
+              logSecureControlMessage("local", controlMessage);
+              if (phoneSocket.readyState === WebSocket.OPEN) {
+                phoneSocket.send(JSON.stringify(controlMessage));
+              }
+            },
+            onApplicationMessage(plaintextMessage) {
+              handleApplicationMessage(plaintextMessage);
+            },
+          })) {
+            return;
+          }
+        });
+      },
+      onDisconnect(phoneSocket) {
+        const wasActiveSocket = socket === phoneSocket;
+        if (wasActiveSocket) {
+          socket = null;
+        }
+        if (!wasActiveSocket || isShuttingDown) {
+          return;
+        }
+        stopContextUsageWatcher();
+        rolloutLiveMirror?.stopAll();
+        desktopIpcActionFollower?.stopAll();
+        desktopRefresher.handleTransportReset();
+        logConnectionStatus("waiting for phone (local)");
+      },
+      onError(error) {
+        if (error?.code === "EADDRINUSE") {
+          console.error(
+            `[remodex] Port ${port} already in use. Set REMODEX_LOCAL_PORT to change.`
+          );
+        } else {
+          console.error(`[remodex] Local server error: ${error?.message || "Unknown local server failure."}`);
+        }
+        shutdown(codex, cleanupBridgeResources);
+      },
+    });
+
+    closeLocalServer = close;
+  }
+
+  if (config.localMode) {
+    startLocalMode();
+  } else {
+    startRelayMode();
+  }
 
   codex.onMessage((message) => {
     if (handleBridgeManagedCodexResponse(message)) {
@@ -473,15 +612,16 @@ function startBridge({
     desktopRefresher.handleOutbound(message);
     pushNotificationTracker.handleOutbound(message);
     rememberThreadFromMessage("codex", message);
+    const outboundMessage = config.localMode
+      ? message
+      : sanitizeRelayBoundCodexMessage(message);
     secureTransport.queueOutboundApplicationMessage(
-      sanitizeRelayBoundCodexMessage(message),
+      outboundMessage,
       sendRelayWireMessage
     );
   });
 
   codex.onClose(() => {
-    clearRelayWatchdog();
-    clearBridgeStatusHeartbeat();
     logConnectionStatus("disconnected");
     publishBridgeStatus({
       state: "stopped",
@@ -489,34 +629,11 @@ function startBridge({
       pid: process.pid,
       lastError: "",
     });
-    isShuttingDown = true;
-    bridgeWakeAssertion.stop();
-    clearReconnectTimer();
-    stopContextUsageWatcher();
-    rolloutLiveMirror?.stopAll();
-    desktopIpcActionFollower?.stopAll();
-    desktopRefresher.handleTransportReset();
-    failBridgeManagedCodexRequests(new Error("Codex transport closed before the bridge request completed."));
-    forwardedRequestMethodsById.clear();
-    if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
-      socket.close();
-    }
+    cleanupBridgeResources();
   });
 
-  process.on("SIGINT", () => shutdown(codex, () => socket, () => {
-    isShuttingDown = true;
-    bridgeWakeAssertion.stop();
-    clearReconnectTimer();
-    clearRelayWatchdog();
-    clearBridgeStatusHeartbeat();
-  }));
-  process.on("SIGTERM", () => shutdown(codex, () => socket, () => {
-    isShuttingDown = true;
-    bridgeWakeAssertion.stop();
-    clearReconnectTimer();
-    clearRelayWatchdog();
-    clearBridgeStatusHeartbeat();
-  }));
+  process.on("SIGINT", () => shutdown(codex, cleanupBridgeResources));
+  process.on("SIGTERM", () => shutdown(codex, cleanupBridgeResources));
 
   // Routes decrypted app payloads through the same bridge handlers as before.
   function handleApplicationMessage(rawMessage) {
@@ -571,10 +688,13 @@ function startBridge({
     codex.send(rawMessage);
   }
 
-  // Encrypts bridge-generated responses instead of letting the relay see plaintext.
+  // Encrypts bridge-generated responses instead of letting the transport see plaintext.
   function sendApplicationResponse(rawMessage) {
+    const outboundMessage = config.localMode
+      ? rawMessage
+      : sanitizeRelayBoundCodexMessage(rawMessage);
     secureTransport.queueOutboundApplicationMessage(
-      sanitizeRelayBoundCodexMessage(rawMessage),
+      outboundMessage,
       sendRelayWireMessage
     );
   }
@@ -1329,17 +1449,49 @@ function buildMacRegistration(deviceState, pairingSession) {
   };
 }
 
-function shutdown(codex, getSocket, beforeExit = () => {}) {
-  beforeExit();
-
-  const socket = getSocket();
-  if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
-    socket.close();
-  }
-
+function shutdown(codex, cleanupBridgeResources) {
+  cleanupBridgeResources();
   codex.shutdown();
 
   setTimeout(() => process.exit(0), 100);
+}
+
+function describeSecureControlMessage(transportLabel, controlMessage) {
+  const kind = readString(controlMessage?.kind);
+  if (kind === "secureError") {
+    const code = readString(controlMessage?.code) || "unknown_secure_error";
+    const message = readString(controlMessage?.message) || "The bridge rejected the secure pairing.";
+    return {
+      level: "warn",
+      line: `[remodex] Secure pairing failed (${transportLabel}, ${code}): ${message}`,
+    };
+  }
+
+  if (kind === "secureReady") {
+    const macDeviceId = readString(controlMessage?.macDeviceId);
+    return {
+      level: "info",
+      line: macDeviceId
+        ? `[remodex] Secure pairing established (${transportLabel}, mac=${macDeviceId})`
+        : `[remodex] Secure pairing established (${transportLabel})`,
+    };
+  }
+
+  return null;
+}
+
+function logSecureControlMessage(transportLabel, controlMessage) {
+  const description = describeSecureControlMessage(transportLabel, controlMessage);
+  if (!description) {
+    return;
+  }
+
+  if (description.level === "warn") {
+    console.warn(description.line);
+    return;
+  }
+
+  console.log(description.line);
 }
 
 function extractBridgeMessageContext(rawMessage) {
@@ -2464,6 +2616,7 @@ function persistBridgePreferences(
 module.exports = {
   buildHeartbeatBridgeStatus,
   createMacOSBridgeWakeAssertion,
+  describeSecureControlMessage,
   fetchAdaptiveThreadTurnsListForRelay,
   hasRelayConnectionGoneStale,
   persistBridgePreferences,
